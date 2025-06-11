@@ -5,9 +5,19 @@ from temporalio import activity, workflow
 from modules.application.types import BaseWorker, RegisteredWorker
 from modules.application.workers.health_check_worker import HealthCheckWorker
 
+# Try to import notification workers, but don't fail if missing
+try:
+    from modules.notification.workers.notification_worker import (
+        NotificationCleanupWorker,
+        NotificationSchedulerWorker,
+    )
+    NOTIFICATION_WORKERS = [NotificationSchedulerWorker, NotificationCleanupWorker]
+except ImportError:
+    NOTIFICATION_WORKERS = []
+
 
 class TemporalConfig:
-    WORKERS: List[Type[BaseWorker]] = [HealthCheckWorker]
+    WORKERS: List[Type[BaseWorker]] = [HealthCheckWorker] + NOTIFICATION_WORKERS
 
     REGISTERED_WORKERS: List[RegisteredWorker] = []
 
@@ -21,7 +31,7 @@ class TemporalConfig:
         wrapped_run = workflow.run(cls.run)
         setattr(cls, "run", wrapped_run)
 
-        # Decorate the class itself as a application definition
+        # Decorate the class itself as a workflow definition
         cls = workflow.defn(cls)
 
         TemporalConfig.REGISTERED_WORKERS.append(RegisteredWorker(cls=cls, priority=cls.priority))

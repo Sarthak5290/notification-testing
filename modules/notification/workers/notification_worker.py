@@ -1,44 +1,60 @@
-from typing import List, Type
+from typing import Any
 
-from temporalio import activity, workflow
-
-from modules.application.types import BaseWorker, RegisteredWorker
-from modules.application.workers.health_check_worker import HealthCheckWorker
-from modules.notification.workers.notification_worker import (
-    NotificationCleanupWorker,
-    NotificationSchedulerWorker,
-)
+from modules.application.types import BaseWorker
+from modules.logger.logger import Logger
 
 
-class TemporalConfig:
-    WORKERS: List[Type[BaseWorker]] = [
-        HealthCheckWorker,
-        NotificationSchedulerWorker,
-        NotificationCleanupWorker,
-    ]
-
-    REGISTERED_WORKERS: List[RegisteredWorker] = []
+class NotificationSchedulerWorker(BaseWorker):
+    """Worker to process scheduled notifications"""
+    
+    max_execution_time_in_seconds = 300  # 5 minutes
+    max_retries = 2
 
     @staticmethod
-    def _register_worker(cls: Type[BaseWorker]) -> None:
-        # Wrap the execute() method so Temporal recognizes it as an activity
-        wrapped_execute = activity.defn(fn=cls.execute, name=f"{cls.__name__}_execute")  # type: ignore
-        setattr(cls, "execute", wrapped_execute)
+    async def execute(*args: Any) -> None:
+        try:
+            # Import here to avoid circular imports
+            from modules.notification.notification_service import NotificationService
+            
+            Logger.info(message="Starting scheduled notification processing")
+            
+            # Process scheduled notifications that are ready to be sent
+            processed_notifications = NotificationService.process_scheduled_notifications()
+            
+            Logger.info(
+                message=f"Processed {len(processed_notifications)} scheduled notifications"
+            )
+            
+        except Exception as e:
+            Logger.error(message=f"Error processing scheduled notifications: {str(e)}")
+            raise
 
-        # Wrap the run() method so Temporal recognizes it as the application entry point
-        wrapped_run = workflow.run(cls.run)
-        setattr(cls, "run", wrapped_run)
+    async def run(self, *args: Any) -> None:
+        await super().run(*args)
 
-        # Decorate the class itself as a application definition
-        cls = workflow.defn(cls)
 
-        TemporalConfig.REGISTERED_WORKERS.append(RegisteredWorker(cls=cls, priority=cls.priority))
+class NotificationCleanupWorker(BaseWorker):
+    """Worker to clean up old notifications"""
+    
+    max_execution_time_in_seconds = 600  # 10 minutes
+    max_retries = 1
 
     @staticmethod
-    def mount_workers() -> None:
-        for worker in TemporalConfig.WORKERS:
-            TemporalConfig._register_worker(worker)
+    async def execute(*args: Any) -> None:
+        try:
+            # Import here to avoid circular imports
+            from modules.notification.notification_service import NotificationService
+            
+            Logger.info(message="Starting notification cleanup")
+            
+            # Clean up notifications older than 90 days
+            deleted_count = NotificationService.cleanup_old_notifications(days_old=90)
+            
+            Logger.info(message=f"Cleaned up {deleted_count} old notifications")
+            
+        except Exception as e:
+            Logger.error(message=f"Error during notification cleanup: {str(e)}")
+            raise
 
-    @staticmethod
-    def get_all_registered_workers() -> List[RegisteredWorker]:
-        return TemporalConfig.REGISTERED_WORKERS
+    async def run(self, *args: Any) -> None:
+        await super().run(*args)

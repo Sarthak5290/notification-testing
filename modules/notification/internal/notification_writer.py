@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 from bson.objectid import ObjectId
 from pymongo import ReturnDocument
 
-from modules.notification.errors import NotificationNotFoundError
+from modules.notification.errors import NotificationNotFoundError, NotificationTemplateNotFoundError
 from modules.notification.internal.notification_util import NotificationUtil
 from modules.notification.internal.store.notification_model import (
     DeviceTokenModel,
@@ -213,22 +213,22 @@ class NotificationWriter:
     @staticmethod
     def register_device_token(account_id: str, token: str, platform: str) -> DeviceToken:
         """Register or update device token for an account"""
-        # Deactivate any existing tokens for this device
-        DeviceTokenRepository.collection().update_many(
-            {"token": token},
-            {"$set": {"is_active": False, "updated_at": datetime.now()}}
+        # Use upsert to either update existing or insert new
+        DeviceTokenRepository.collection().update_one(
+            {"token": token},  # Find by token
+            {
+                "$set": {
+                    "account_id": account_id,
+                    "platform": platform,
+                    "is_active": True,
+                    "updated_at": datetime.now()
+                },
+                "$setOnInsert": {
+                    "created_at": datetime.now()
+                }
+            },
+            upsert=True  # Create if doesn't exist, update if exists
         )
-        
-        # Insert new active token
-        device_token_bson = DeviceTokenModel(
-            id=None,
-            account_id=account_id,
-            token=token,
-            platform=platform,
-            is_active=True
-        ).to_bson()
-        
-        DeviceTokenRepository.collection().insert_one(device_token_bson)
         
         return DeviceToken(token=token, platform=platform)
 

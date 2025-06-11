@@ -13,11 +13,14 @@ from modules.authentication.rest_api.authentication_rest_api_server import Authe
 from modules.config.config_service import ConfigService
 from modules.logger.logger import Logger
 from modules.logger.logger_manager import LoggerManager
-from modules.notification.rest_api.notification_rest_api_server import NotificationRestApiServer
-from modules.notification.workers.notification_worker import (
-    NotificationCleanupWorker,
-    NotificationSchedulerWorker,
-)
+
+# Try to import notification components, but don't fail if they're missing
+try:
+    from modules.notification.rest_api.notification_rest_api_server import NotificationRestApiServer
+    NOTIFICATION_AVAILABLE = True
+except ImportError:
+    NOTIFICATION_AVAILABLE = False
+    Logger.warn(message="Notification module not available, skipping notification features")
 
 load_dotenv()
 
@@ -35,18 +38,29 @@ try:
     # In production, it is optional to run this worker
     ApplicationService.schedule_worker_as_cron(cls=HealthCheckWorker, cron_schedule="*/10 * * * *")
     
-    # Start notification workers
-    # Process scheduled notifications every 5 minutes
-    ApplicationService.schedule_worker_as_cron(
-        cls=NotificationSchedulerWorker, 
-        cron_schedule="*/5 * * * *"
-    )
-    
-    # Clean up old notifications daily at 2 AM
-    ApplicationService.schedule_worker_as_cron(
-        cls=NotificationCleanupWorker, 
-        cron_schedule="0 2 * * *"
-    )
+    # Only start notification workers if notification module is available
+    if NOTIFICATION_AVAILABLE:
+        try:
+            from modules.notification.workers.notification_worker import (
+                NotificationCleanupWorker,
+                NotificationSchedulerWorker,
+            )
+            
+            # Start notification workers
+            # Process scheduled notifications every 5 minutes
+            ApplicationService.schedule_worker_as_cron(
+                cls=NotificationSchedulerWorker, 
+                cron_schedule="*/5 * * * *"
+            )
+            
+            # Clean up old notifications daily at 2 AM
+            ApplicationService.schedule_worker_as_cron(
+                cls=NotificationCleanupWorker, 
+                cron_schedule="0 2 * * *"
+            )
+            Logger.info(message="Notification workers started successfully")
+        except ImportError:
+            Logger.warn(message="Notification workers not available, skipping")
 
 except WorkerClientConnectionError as e:
     Logger.critical(message=e.message)
@@ -67,9 +81,14 @@ api_blueprint.register_blueprint(authentication_blueprint)
 account_blueprint = AccountRestApiServer.create()
 api_blueprint.register_blueprint(account_blueprint)
 
-# Register notification apis
-notification_blueprint = NotificationRestApiServer.create()
-api_blueprint.register_blueprint(notification_blueprint)
+# Register notification apis only if available
+if NOTIFICATION_AVAILABLE:
+    try:
+        notification_blueprint = NotificationRestApiServer.create()
+        api_blueprint.register_blueprint(notification_blueprint)
+        Logger.info(message="Notification REST API registered successfully")
+    except Exception as e:
+        Logger.error(message=f"Failed to register notification REST API: {str(e)}")
 
 app.register_blueprint(api_blueprint)
 

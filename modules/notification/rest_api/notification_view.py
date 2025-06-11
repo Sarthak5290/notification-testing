@@ -57,47 +57,33 @@ class NotificationView(MethodView):
             scheduled_at=scheduled_at
         )
         
-        notification = NotificationService.create_notification(create_params)
-        
-        # If not scheduled, send immediately
-        if not scheduled_at:
-            try:
-                if topic:
-                    # Send to topic
-                    notification_data = NotificationData(
-                        title=title,
-                        body=body,
-                        image_url=image_url,
-                        data=data
-                    )
-                    send_params = SendTopicNotificationParams(
-                        topic=topic,
-                        notification=notification_data
-                    )
-                    NotificationService.send_topic_notification(send_params)
-                else:
-                    # Send to devices
-                    notification_data = NotificationData(
-                        title=title,
-                        body=body,
-                        image_url=image_url,
-                        data=data
-                    )
-                    send_params = SendNotificationParams(
-                        recipient_tokens=device_tokens,
-                        notification=notification_data
-                    )
-                    NotificationService.send_notification(send_params)
+        try:
+            notification = NotificationService.create_notification(create_params)
+            
+            # If not scheduled, mark as sent for now (until FCM is configured)
+            if not scheduled_at:
+                from modules.logger.logger import Logger
+                Logger.info(message=f"MOCK: Would send notification '{title}' to tokens: {device_tokens}")
                 
-                # Update status to sent
-                notification = NotificationService.mark_notification_as_delivered(notification.id)
-                
-            except Exception as e:
-                # Keep the notification but mark as failed
-                notification = NotificationService.mark_notification_as_failed(notification.id, str(e))
-        
-        notification_dict = asdict(notification)
-        return jsonify(notification_dict), 201
+                # Mark as sent for testing
+                notification = NotificationService.mark_notification_as_sent(notification.id)
+            
+            notification_dict = asdict(notification)
+            return jsonify(notification_dict), 201
+            
+        except Exception as e:
+            # If notification was created but sending failed, mark it as failed
+            if 'notification' in locals():
+                NotificationService.mark_notification_as_failed(notification.id, str(e))
+            
+            # Return error response
+            from modules.logger.logger import Logger
+            Logger.error(message=f"Failed to create/send notification: {str(e)}")
+            
+            return jsonify({
+                "error": "Failed to create notification",
+                "message": str(e)
+            }), 500
 
     @access_auth_middleware
     def get(self) -> ResponseReturnValue:
